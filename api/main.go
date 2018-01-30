@@ -13,6 +13,9 @@ import (
 	oauth2 "google.golang.org/api/oauth2/v1"
 )
 
+var myAudience = "135057060926-gnm5fuukant99g0j94mun356aujugdum.apps.googleusercontent.com"
+var issuer = "accounts.google.com"
+
 func main() {
 
 	// Here we are instantiating the gorilla/mux router
@@ -41,8 +44,9 @@ func verifyIdToken(idToken string) (*oauth2.Tokeninfo, error) {
 func googleMiddlewareHandler(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 
-		//Define CORS
+		//Define CORS response
 		if origin := r.Header.Get("Origin"); origin != "" {
+			fmt.Println(origin)
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
 			w.Header().Set("Access-Control-Allow-Headers",
@@ -53,20 +57,28 @@ func googleMiddlewareHandler(h http.Handler) http.Handler {
 			return
 		}
 
-		// Let secure process the request. If it returns an error,
-		// that indicates the request should not continue.
 		reqToken := r.Header.Get("Authorization")
 		splitToken := strings.Split(reqToken, "Bearer ")
 		reqToken = splitToken[1]
 		tokenInfo, err := verifyIdToken(reqToken)
 
+		// Let secure process the request. If it returns an error,
+		// that indicates the request should not continue.
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
 			w.Write([]byte("{\"error\": \"invalid token\"}"))
 			return
 		} else {
-			newRequest := r.WithContext(context.WithValue(r.Context(), "tokeninfo", tokenInfo))
+			isInvalidAudien := tokenInfo.Audience != myAudience
+			isInvalidIssuer := tokenInfo.Issuer != issuer
+			if isInvalidAudien || isInvalidIssuer {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnauthorized)
+				w.Write([]byte("{\"error\": \"invalid token\"}"))
+				return
+			}
+			newRequest := r.WithContext(context.WithValue(r.Context(), "user", tokenInfo))
 			*r = *newRequest
 			h.ServeHTTP(w, r)
 		}
@@ -79,9 +91,8 @@ var HealthHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request
 
 var ProfileHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	token, _ := ctx.Value("tokeninfo").(*oauth2.Tokeninfo)
-	fmt.Println(token.Email)
-	response, _ := json.Marshal(token)
+	user, _ := ctx.Value("user").(*oauth2.Tokeninfo)
+	response, _ := json.Marshal(user)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Write([]byte(response))
