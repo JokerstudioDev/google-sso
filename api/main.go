@@ -1,10 +1,7 @@
 package main
 
 import (
-	"encoding/base64"
 	"encoding/json"
-	"errors"
-	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -18,8 +15,9 @@ import (
 	"google.golang.org/api/option"
 )
 
-var myAudience = "135057060926-gnm5fuukant99g0j94mun356aujugdum.apps.googleusercontent.com"
-var issuer = "accounts.google.com"
+type Key uint8
+
+var UserKey Key
 
 func main() {
 
@@ -33,19 +31,17 @@ func main() {
 	http.ListenAndServe(":3000", handlers.LoggingHandler(os.Stdout, r))
 }
 
-var httpClient = &http.Client{}
-
 func verifyIDToken(idToken string) (*auth.Token, error) {
 	opt := option.WithCredentialsFile("./serviceAccountKey.json")
 	app, err := firebase.NewApp(context.Background(), nil, opt)
 	client, err := app.Auth(context.Background())
 	if err != nil {
-		log.Fatalf("error getting Auth client: %v\n", err)
+		return nil, err
 	}
 
 	token, err := client.VerifyIDToken(idToken)
 	if err != nil {
-		log.Fatalf("error verifying ID token: %v\n", err)
+		return nil, err
 	}
 
 	return token, nil
@@ -85,27 +81,11 @@ func googleMiddlewareHandler(h http.Handler) http.Handler {
 				Name:          tokenInfo.Claims["name"].(string),
 				Picture:       tokenInfo.Claims["picture"].(string),
 			}
-			newRequest := r.WithContext(context.WithValue(r.Context(), "user", user))
+			newRequest := r.WithContext(context.WithValue(r.Context(), UserKey, user))
 			*r = *newRequest
 			h.ServeHTTP(w, r)
 		}
 	})
-}
-
-// Decode returns tokenInfo
-func Decode(token string) (*Tokeninfo, error) {
-	s := strings.Split(token, ".")
-	if len(s) != 3 {
-		return nil, errors.New("Invalid token received")
-	}
-	decoded, err := base64.RawURLEncoding.DecodeString(s[1])
-
-	if err != nil {
-		return nil, err
-	}
-	tokenInfo := new(Tokeninfo)
-	err = json.Unmarshal(decoded, &tokenInfo)
-	return tokenInfo, err
 }
 
 // HealthHandler return api health
@@ -116,53 +96,12 @@ var HealthHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request
 // ProfileHandler return profile info in token
 var ProfileHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	user, _ := ctx.Value("user").(User)
+	user, _ := ctx.Value(UserKey).(User)
 	response, _ := json.Marshal(user)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Write([]byte(response))
 })
-
-//Tokeninfo extracted from id_token
-type Tokeninfo struct {
-	// AccessType: The access type granted with this token. It can be
-	// offline or online.
-	AccessType string `json:"access_type,omitempty"`
-
-	// Audience: Who is the intended audience for this token. In general the
-	// same as issued_to.
-	Audience string `json:"aud,omitempty"`
-
-	// Email: The email address of the user. Present only if the email scope
-	// is present in the request.
-	Email string `json:"email,omitempty"`
-
-	// EmailVerified: Boolean flag which is true if the email address is
-	// verified. Present only if the email scope is present in the request.
-	EmailVerified bool `json:"email_verified,omitempty"`
-
-	// ExpiresIn: The expiry time of the token, as number of seconds left
-	// until expiry.
-	ExpiresIn int64 `json:"exp,omitempty"`
-
-	// IssuedAt: The issue time of the token, as number of seconds.
-	IssuedAt int64 `json:"ist,omitempty"`
-
-	// Issuer: Who issued the token.
-	Issuer string `json:"iss,omitempty"`
-
-	Sub string `json:"sub,omitempty"`
-
-	Name string `json:"name,omitempty"`
-
-	Picture string `json:"picture,omitempty"`
-
-	GivenName string `json:"given_name,omitempty"`
-
-	FamilyName string `json:"family_name,omitempty"`
-
-	Locale string `json:"locale,omitempty"`
-}
 
 //User informations
 type User struct {
